@@ -1,0 +1,25 @@
+Architecture decision
+_____________________
+
+
+
+API v1 (REST API):
+- I don't use it anymore, so I don't apply it in kubenetes cluster 
+
+Location API (REST API):
+- Loading Location ID from the database through REST API.
+
+Location Producer (gRPC + Message Queue (Kafka)):
+- Loading location data supposed handling the large volume of data. 
+Therefore I use gRPC (compared to REST, gRPC provides greater performance) 
+and Kafka (improve reliability at the large volume of data).
+
+Person API (REST API):
+- There were no requirements to accept a large amount of data. 
+Therefore, created a separate service without changes.
+
+Connection API (REST API):
+- Similar, I created a separate service by copy connection routes.
+
+Frontend (REST API):
+- Ports were changed for loading data from Person API and Connection API.

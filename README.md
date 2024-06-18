@@ -79,22 +79,139 @@ Afterwards, you can test that `kubectl` works by running a command like `kubectl
 1. `kubectl apply -f deployment/db-configmap.yaml` - Set up environment variables for the pods
 2. `kubectl apply -f deployment/db-secret.yaml` - Set up secrets for the pods
 3. `kubectl apply -f deployment/postgres.yaml` - Set up a Postgres database running PostGIS
-4. `kubectl apply -f deployment/udaconnect-api.yaml` - Set up the service and deployment for the API
-5. `kubectl apply -f deployment/udaconnect-app.yaml` - Set up the service and deployment for the web app
-6. `sh scripts/run_db_command.sh <POD_NAME>` - Seed your database against the `postgres` pod. (`kubectl get pods` will give you the `POD_NAME`)
+### 4. `kubectl apply -f deployment/udaconnect-api.yaml` - Set up the service and deployment for the API -  We no need this step 
+4. `kubectl apply -f deployment/udaconnect-location-api.yaml` - Set up the service and deployment for the Location API
+
+5. `kubectl apply -f deployment/udaconnect-person-api.yaml` - Set up the service and deployment for the Person API
+6. `kubectl apply -f deployment/udaconnect-connection-api.yaml` - Set up the service and deployment for the Connection API
+
+7. `kubectl apply -f deployment/udaconnect-app.yaml` - Set up the service and deployment for the web app
+8. `sh scripts/run_db_command.sh <POD_NAME>` - Seed your database against the `postgres` pod. (`kubectl get pods` will give you the `POD_NAME`)
 
 Manually applying each of the individual `yaml` files is cumbersome but going through each step provides some context on the content of the starter project. In practice, we would have reduced the number of steps by running the command against a directory to apply of the contents: `kubectl apply -f deployment/`.
 
 Note: The first time you run this project, you will need to seed the database with dummy data. Use the command `sh scripts/run_db_command.sh <POD_NAME>` against the `postgres` pod. (`kubectl get pods` will give you the `POD_NAME`). Subsequent runs of `kubectl apply` for making changes to deployments or services shouldn't require you to seed the database again!
 
-### Verifying it Works
-Once the project is up and running, you should be able to see 3 deployments and 3 services in Kubernetes:
-`kubectl get pods` and `kubectl get services` - should both return `udaconnect-app`, `udaconnect-api`, and `postgres`
+9. Install and configure kafka in VM
+  ##### 9.1 Run `helm install kafka oci://registry-1.docker.io/bitnamicharts/kafka` from local machine. This will output 
+    ```bash
+    Pulled: registry-1.docker.io/bitnamicharts/kafka:29.3.3
+    Digest: sha256:589c7f70b5ed477f391b91563b4db708396f6e7f036a0db1760ff66d562ec3f9
+    NAME: kafka
+    LAST DEPLOYED: Tue Jun 18 20:51:50 2024
+    NAMESPACE: default
+    STATUS: deployed
+    REVISION: 1
+    TEST SUITE: None
+    NOTES:
+    CHART NAME: kafka
+    CHART VERSION: 29.3.3
+    APP VERSION: 3.7.0
 
+    ** Please be patient while the chart is being deployed **
+
+    Kafka can be accessed by consumers via port 9092 on the following DNS name from within your cluster:
+
+        kafka.default.svc.cluster.local
+
+    Each Kafka broker can be accessed by producers via port 9092 on the following DNS name(s) from within your cluster:
+
+        kafka-controller-0.kafka-controller-headless.default.svc.cluster.local:9092
+        kafka-controller-1.kafka-controller-headless.default.svc.cluster.local:9092
+        kafka-controller-2.kafka-controller-headless.default.svc.cluster.local:9092
+
+    The CLIENT listener for Kafka client connections from within your cluster have been configured with the following security settings:
+        - SASL authentication
+
+    To connect a client to your Kafka, you need to create the 'client.properties' configuration files with the content below:
+
+    security.protocol=SASL_PLAINTEXT
+    sasl.mechanism=SCRAM-SHA-256
+    sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required \
+        username="user1" \
+        password="$(kubectl get secret kafka-user-passwords --namespace default -o jsonpath='{.data.client-passwords}' | base64 -d | cut -d , -f 1)";
+
+    To create a pod that you can use as a Kafka client run the following commands:
+
+        kubectl run kafka-client --restart='Never' --image docker.io/bitnami/kafka:3.7.0-debian-12-r7 --namespace default --command -- sleep infinity
+        kubectl cp --namespace default /path/to/client.properties kafka-client:/tmp/client.properties
+        kubectl exec --tty -i kafka-client --namespace default -- bash
+
+        PRODUCER:
+            kafka-console-producer.sh \
+                --producer.config /tmp/client.properties \
+                --broker-list kafka-controller-0.kafka-controller-headless.default.svc.cluster.local:9092,kafka-controller-1.kafka-controller-headless.default.svc.cluster.local:9092,kafka-controller-2.kafka-controller-headless.default.svc.cluster.local:9092 \
+                --topic test
+
+        CONSUMER:
+            kafka-console-consumer.sh \
+                --consumer.config /tmp/client.properties \
+                --bootstrap-server kafka.default.svc.cluster.local:9092 \
+                --topic test \
+                --from-beginning
+
+    WARNING: There are "resources" sections in the chart not set. Using "resourcesPreset" is not recommended for production. For production installations, please set the following values according to your workload needs:
+      - controller.resources
+    +info https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+    ```
+  ##### 9.2 Create SASL authentication and a client pod for manupulate with Kafka
+    
+    ##### Run this command to get the password
+      `kubectl get secret kafka-user-passwords --namespace default -o jsonpath='{.data.client-passwords}' | base64 -d | cut -d , -f 1` 
+    
+    ##### Create a client.properties file with this content ( change password_get_from_command to password get from command above)
+      security.protocol=SASL_PLAINTEXT
+      sasl.mechanism=SCRAM-SHA-256
+      sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required \
+          username="user1" \
+          password="password_get_from_command";
+    ##### Run follow command to create a pod that you can use as a Kafka client run the following commands:
+      kubectl run kafka-client --restart='Never' --image docker.io/bitnami/kafka:3.7.0-debian-12-r7 --namespace default --command -- sleep infinity
+      kubectl cp --namespace default client.properties kafka-client:/tmp/client.properties
+
+  ##### 9.5 Create topic 'location'
+    ```bash
+    kubectl cp client.properties kafka-client:/tmp
+
+    kubectl exec -it kafka-client -- kafka-topics.sh \
+      --create --bootstrap-server kafka:9092 \
+      --replication-factor 1 --partitions 1 \
+      --command-config /tmp/client.properties \
+      --topic 'location'
+    ```
+  ##### 9.6 Enter 2 times `exit` Logout from vagrant box
+  ##### 9.7 `kubectl get pods` verify the installation
+
+10. `kubectl apply -f deployment/kafka-configmap.yaml` - Set up environment variables for the pods
+11. `kubectl apply -f deployment/udaconnect-location-consumer.yaml` - Setup Kafka consumer 
+12. `kubectl apply -f deployment/udaconnect-location-producer.yaml` - Setup Kafka producer 
+14. Test gRPC pipeline through kafka
+  ##### 14.1 `kubectl exec -it <location-producer-pod-name> sh` Go in location-producer (`kubectl get pods` will give you the `location-producer-pod-name`)
+  ##### 14.2 `python app/grpc_location_generator.py` Execute the grpc location generator with the command below 
+  ##### 14.3 Check logs
+  ```
+  kubectl logs -f <location-producer-pod-name>
+
+  kubectl logs -f <location-consumer-pod-name>
+  ```
+
+### Verifying it Works
+Once the project is up and running, you should be able to see 11 pods and 10 services in Kubernetes:
+`kubectl get pods` looks like:
+![Pods](docs/pods_screenshot.PNG)
+
+`kubectl get services` looks like:
+![Services](docs/services.png)
 
 These pages should also load on your web browser:
-* `http://localhost:30001/` - OpenAPI Documentation
-* `http://localhost:30001/api/` - Base path for API
+* `http://localhost:30001/` - OpenAPI Documentation for API v1
+* `http://localhost:30001/api/` - Base path for API v1
+* `http://localhost:30011/` - OpenAPI Documentation for Location API
+* `http://localhost:30011/api/` - Base path for Location API
+* `http://localhost:30031/` - OpenAPI Documentation for Person API
+* `http://localhost:30031/api/` - Base path for Person API
+* `http://localhost:30041/` - OpenAPI Documentation for Connection API
+*** `http://localhost:30041/api/` - Base path for Connection API - We not use this any more
 * `http://localhost:30000/` - Frontend ReactJS Application
 
 #### Deployment Note
